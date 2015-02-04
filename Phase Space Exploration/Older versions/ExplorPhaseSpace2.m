@@ -1,0 +1,246 @@
+% This program is used to explore a critical trajectory for two paramters
+% From our set of 16 parameters:
+% {klpf,klmf,klpm,klmm,kap,kam,kn,cnmRatio,kbf,kbm,y00,p00,rs,rfm,n,m,x}
+% we are fixing all but two.
+% then choose one of the two as the base paramerter and the other as the adjustable one.
+% We choose a base value and an adjustable value on the critical or desire phase space line
+% then vary the base value and adjust the other variable until we return
+% to the desire phase line.
+
+% Clean work space
+clc             % Clear work space
+close           % Close figures
+clear           % Clear all variables
+
+% Initial time scale settings
+tDay = 60*60*24;    % Seconds in a day
+tHour = 3600;       % Seconds in one hour
+tFactor = 1e-6;     % Time factor for simulation
+rs = tFactor/tHour;
+rfm = tFactor/tDay;
+FailCounter = 1000;  % Counts the number of times the test failed 
+
+% Choose which parameters to fix:
+% 1: klpf       elongation (monomer attachment) for free aggregates
+% 2: klmf       monomer dettachment, for free aggregates 
+% 3: klpm       elongation (monomer attachment) for membrane bounnd aggregates
+% 4: klmm       monomer dettachment, for membrane bounnd aggregates
+% 5: kap        attachemnt rate, of aggregates to te membrane
+% 6: kam        dettachment rate, of aggregates to te membrane
+% 7: kn         free aggregates nucleation rate
+% 8: cnmRatio   cnmRatio = (cnm equivalent)/cn = cnm*p0/cn
+% 9: kbf        free aggregates brakage rate
+% 10: kbm       mambrane aggregates brakage rate
+% 11: y00       initial A-Beta concentration
+% 12: p00       initial Prion concentration
+% 13: rs        Sequestration rate
+% 14: rfm       Out-flow rate
+% 15: n         size of maximum aggregates length
+% 16: m         number of iterations
+% 17: FailCounter
+
+% select number of base parameter
+basePnum = 11;
+% select adjustable parameter
+adjPnum = 2;
+
+% select direction to explor (-1) decrease basePval (1) increase
+ExplorDir = 1;
+
+% Initial Values           
+ndataPoints = 10;               % the number of new data points we want to fine on the phase path
+JobStatus = 1;                  % Job Errors flag
+TestVal = zeros(1,4);           % pass test 0, fail test 1
+AccomulationFlag = zeros(1,4);  % check if we have accomulation at the end of the y or g arrays
+y = zeros(1000,1);              % Initializing point arrays
+x = zeros(1000,1);              % Initializing point arrays
+tempX = 0;
+tempY = 0;
+OldTransPosSign = 0;            % 
+OldXY = 0;
+dy = 0;
+xFactor = 0;
+yFactor = 0;
+fittedFun = '';
+
+% Open a file for data collection
+% the file need to have at leat one line of data for the initial conditions
+% Every line in the file that starts with # will be ignorred
+FileName = 'PhaseLine vary y0 and klmf.txt';
+fileID = fopen(FileName,'r+');       % Open file for reading
+oldDataLength = 0;
+DataLine = fgetl(fileID);
+while ischar(DataLine)
+    if DataLine(1)=='['          % Collecting data only from lines that starts with [
+        oldDataLength = oldDataLength + 1;
+        initParameter = eval(DataLine);
+        y(oldDataLength) = initParameter(basePnum);      % Set initial value
+        x(oldDataLength) = initParameter(adjPnum);       % Set initial value    
+    end
+    disp(DataLine)
+    DataLine = fgetl(fileID);
+end
+
+% Start labs
+matlabpool                      % allocate local MATLAB labs for parallel functions execution  
+labSize = matlabpool('size');   % find out how many processors we use
+if labSize~=4                   % test if we have enough labs
+    matlabpool close
+    disp(['Only ' num2str(labSize) ' are available !!!!'])
+    disp('This program is designed for 4 labs')
+    JobStatus = 0;              % Indicate that we have Error
+else
+    disp(['Doing ' num2str(labSize) ' runs at paralell'])
+    disp('          ')
+end
+
+if oldDataLength==0
+    % no initial point or points
+    JobStatus = 0;
+    disp('No initial point or points where found in the data file !!!')
+    matlabpool close
+    fclose(fileID);
+end
+
+if JobStatus
+    % Start main loop
+    % At this point we need to have the old data, if exist in the y and x arrays
+    % And the correct file need to be open for writing
+    i = oldDataLength;
+    disp('-----   Main loop start  -----')
+    while (i < (oldDataLength+ndataPoints)) && JobStatus;
+        tic;
+        nFit = 1;               % The largest number of points that give good linear fit for the data
+        RunCycle = 1;           % If there are no additional run issues, Two run cycles will give a point on the phase line
+        Extra_n = 1;            % in use when larger n is needed
+        xDist = 0;              % determine how to split the calculation between the labs
+        TransPos = 0;           % indicate where is the transition between values 0 and 1
+        UseFitFlag = (i>1);     % if use fit flag=1 -> use fit fanction, otherwise skip fitting
+        disp(['Step number (i): ' num2str(i)])
+
+        while RunCycle < 4
+            disp(['RunCycle = ' num2str(RunCycle) ' , UseFitFlag = ' num2str(UseFitFlag)])
+            if RunCycle==1
+                if UseFitFlag
+                    % best fit history to linear or quadratic trajectory
+                    nFit = 1;
+                    fitParameter = 0.99;            % adjrsquare
+                    [xFactor,yFactor] = XYfactor(x(i),y(i));
+                    [nFit,fitParameter,fittedFun]=FitFunction(i,nFit,fitParameter,x,y,xFactor,yFactor);     
+                    % Calculate dy.  We want to have as large dy as possible
+                    dy1 = y(i)-y(i-nFit+1);
+                    ExplorDir = sign(dy1);
+                    dy = ExplorDir*min(abs(dy1),abs(2*y(i)));       % Limit the size of the next step to twice the currnt value  
+                end
+                disp(['dy = ' num2str(dy)])
+                disp(['nFit = ' num2str(nFit)])
+                xDist = 0;  % Use InitUpdateVarArray2 or UpdateVarArray2 with xDist = 0
+                RunCycle = 2;
+            elseif RunCycle==2
+                if nFit==1
+                    if TransPos~=-4
+                        [tempX,tempY] = SetXY(inputMatrix,TransPos,adjPnum,basePnum,tempX,tempY,1);
+                    else
+                        [tempX,tempY] = SetXY(inputMatrix,4,adjPnum,basePnum,tempX,tempY,-1);
+                    end
+                    xDist = TransPos;
+                    RunCycle = 3;
+                elseif IsIn(TransPos,[1,-1,3,-3])
+                    xDist = 2*((abs(TransPos)>2)-0.5);      % -1 if |TransPos|=1 ,  1 if |TransPos|=3
+                    [tempX,tempY] = SetXY(inputMatrix,TransPos,adjPnum,basePnum,tempX,tempY,OldTransPosSign);
+                    OldTransPosSign = sign(TransPos);
+                    RunCycle = 3;
+                else        % TransPos = 4,-4
+                    dy = dy/2;
+                    UseFitFlag = 0;         % skip fitting calculation
+                    RunCycle = 1;
+                    if dy<0.001*y(i)
+                        disp('dy is less than 0.1% of y(i). stopping the program')
+                        JobStatus = 0;
+                        break
+                    end
+                    disp('...........................')
+                    disp(['modified dy ' num2str(dy*2) ' -> ' num2str(dy)])
+                    disp('...........................')
+                end
+            end
+    
+            % Calculate dx using the linear fit that was found
+            inputMatrix = inputMatrixUpdate(initParameter,y(i),dy,x(i),basePnum,adjPnum,ExplorDir,Extra_n,xDist,nFit,xFactor,yFactor,fittedFun);
+            % test inputMatrix size
+            if size(inputMatrix,1)~=4
+                disp('ERROR - inputMatrix has wrong dimentions')
+                JobStatus = 0;
+                break
+            end
+            % Run the job on 4 labs 
+            spmd
+                [yLast,gLast,tLast,TestFlag,alarmFlag,t,M] = AggKineticsV10PhaseExplor([inputMatrix(labindex,:) FailCounter]);
+            end
+            
+            for j=1:4
+                TestVal(j) = (TestFlag{j}>=FailCounter);             % test fail if we have aggregates for at leat FailCounter steps
+                AccomulationFlag(j) = (yLast{j}>0 || gLast{j}>0);
+                disp(['Lab number: ' num2str(j)])
+                disp('==========================')
+                disp(['Alarm Value (Particle number factor): ' num2str(alarmFlag{j})])
+                disp(['Test Value: ' num2str(TestFlag{j})])
+                disp(['AccomulationFlag: ' num2str(max(AccomulationFlag))])
+                disp('--------------------------')
+            end
+            % Get test transion position and store the old position
+            TransPos = GetTransionPos2(TestVal);
+            
+            if sum(AccomulationFlag)>1      % need to run again with a larger aggregate length
+                Extra_n = Extra_n*1.25;
+                UseFitFlag = 0;         % skip fitting calculation
+                RunCycle = 1;           % Start from the begining
+                disp('xxxxxxxxxxxxxxxxxxxxx')
+                disp('Need to run again with loger aggregate lenght')
+                disp(['i = ' num2str(i)])
+                disp(['Extra_n = ' num2str(Extra_n)])
+                disp('xxxxxxxxxxxxxxxxxxxxx')
+            elseif RunCycle==2
+                if nFit>1 && IsIn(TransPos,[-2,2])
+                    [x(i+1),y(i+1)] = SetXY(inputMatrix,TransPos,adjPnum,basePnum,tempX,tempY,OldTransPosSign);
+                    RunCycle = 4;           % go to next point
+                end
+            elseif RunCycle==3 
+                [x(i+1),y(i+1)] = SetXY(inputMatrix,TransPos,adjPnum,basePnum,tempX,tempY,OldTransPosSign);
+                RunCycle = 4;           % go to next point    
+            end
+            if RunCycle==4
+                % set and write new data to file
+                initParameter = InitParameterUpdate(initParameter,basePnum,y(i+1),adjPnum,x(i+1));
+                fprintf(fileID,'%s\n',mat2str(initParameter));
+                disp('============================')
+                disp(['Recording point number ' num2str(i-oldDataLength+1)])
+                disp(['y(i+1) = ' num2str(y(i+1))])
+                disp(['x(i+1) = ' num2str(x(i+1))])
+                % Increse i
+                i = i+1;
+                % Making sure we have no negative values
+               if (y(i)<0 || x(i)<0)
+                   JobStatus = 0;
+                   disp('We have a negative concentration value -> stop program')
+                   fclose(fileID);
+                   matlabpool close   
+               end
+               PoitCalcTime = toc;
+               disp(['Cycle time: ' num2str(PoitCalcTime)])
+            end
+            disp(['TestVal = ' num2str(TestVal)])
+            disp(['TransPos = ' num2str(TransPos)])   
+            disp(['RunCycle = ' num2str(RunCycle)])           
+        end             % end the while RunCycle<4 statement
+    end
+
+    % Close Parallel labs
+    if matlabpool('size')==0
+        matlabpool close
+    end
+    % Close file
+    fclose(fileID);
+end
+
+

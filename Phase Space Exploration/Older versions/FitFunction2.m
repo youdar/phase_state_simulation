@@ -1,0 +1,70 @@
+function [nFit,fitParameter,fittedFun,regularSol,ExplorDir,r,baseAngle]=FitFunction2(i,x,y,xFactor,yFactor)
+
+% Find the best function to predict the next point
+% do not use more that 6 points
+% set default values
+yy = y/yFactor;
+xx = x/xFactor;
+testvalue = 0.97;
+fitParameter = 0.99;            % adjrsquare
+nFit = 1;
+baseAngle = pi/2; 
+fittedFun = '';
+regularSol = 1;
+ExplorDir = 1;
+
+while ((i-nFit)>0 && fitParameter>=testvalue) && nFit<15
+    % Start with linear fit
+    [TempFun,gof]=fit(yy((i-nFit):i),xx((i-nFit):i),'poly1');
+    fitParameter = abs(GetFitParameter(gof));
+    % check if the line is close to horizontal, if yes use horizontal solution
+    if sum(yy(i)==yy((i-nFit):i))~=(nFit+1)
+        regularSol = 1;     
+    else                    % we have a stright horizontal line  
+        regularSol = 0;
+    end
+    disp(['regularSol = ' num2str(regularSol)])
+%     if fitParameter<testvalue
+%         % Try 2nd order polynomial fit
+%         [TempFun,gof]=fit(yy((i-nFit):i),xx((i-nFit):i),'exp1');
+%         fitParameter = abs(GetFitParameter(gof));
+%     end
+%     if fitParameter<testvalue
+%         % Try 2nd order polynomial fit
+%         [TempFun,gof]=fit(yy((i-nFit):i),xx((i-nFit):i),'poly2');
+%         fitParameter = abs(GetFitParameter(gof));
+%     end
+%     if fitParameter<testvalue
+%         % Try 'exp2' fit
+%         [TempFun,gof]=fit(yy((i-nFit):i),xx((i-nFit):i),'exp2');
+%         fitParameter = abs(GetFitParameter(gof));
+%     end
+    if fitParameter>=testvalue           % update the function and nFit
+        nFit = nFit + 1;            % Add 1 to nFit if the linear fit is good
+        fittedFun = TempFun;
+    end
+end
+
+if nFit>1
+    % Calculate dy
+    dy1 = y(i)-y(i-nFit+1);
+    ExplorDir = sign(dy1) + (dy1==0);
+    dy = getdy(ExplorDir,y(i),dy1,yFactor,fittedFun,regularSol);
+    % Calculate baseAngle
+    dyy = dy/yFactor;                                               % we evaluated the function with factorized arrays values
+    if regularSol
+        newX = feval(fittedFun,(y(i)+dy)/yFactor)*xFactor;          % get the x value
+        dx = newX - x(i);
+        baseAngle = atan(differentiate(fittedFun,y(i)/yFactor));    % the angle of the perpendicullar line at point y
+
+    else                % Horizontal solution
+        dx = 0.025*x(i);
+        baseAngle = pi/2;  % the angle of the perpendicullar line at point y
+    end
+    dxx = dx/xFactor;
+    r = sqrt(dyy^2+dxx^2);
+else  
+    r = 0.025*y(i)/yFactor;
+end
+
+

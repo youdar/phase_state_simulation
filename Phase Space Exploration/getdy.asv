@@ -1,0 +1,9 @@
+function dy = getdy(ExplorDir,y,yFactor,fittedFun)
+
+
+ExplorDir*min(abs(dy1),abs(2*y(i)));       % Limit the size of the next step to twice the currnt value  
+oldyy = y/yFactor;
+    if abs(atan(differentiate(fittedFun,yy)) - atan(differentiate(fittedFun,oldyy)))> pi/8
+        newY = y*1.01;
+        yy = newY/yFactor;                       % we evaluated the function with factorized arrays values 
+    end

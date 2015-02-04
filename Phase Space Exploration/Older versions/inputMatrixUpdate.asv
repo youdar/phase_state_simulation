@@ -1,0 +1,32 @@
+function inputMatrix = inputMatrixUpdate(initParameter,y,dy,x,resFactor,basePnum,adjPnum,ExplorDir,Extra_n,xDist,nFit,xFactor,yFactor,fittedFun)
+
+% update and prepare the inputMatrix matrix for the 4 labs
+
+if nFit>1
+    newY = y+dy;
+    yy = NewY/10^yFactor;                       % we evaluated the function with factorized arrays values
+    newX = feval(fittedFun,yy)*10^xFactor;      % get the x value
+    dx = newX - x;
+    r = sqrt(dy^2+dx^2);
+    baseAngle = atan(-differentiate(fittedFun,yy)); % the angle of the perpendicullar line at point y
+
+    inputMatrix(1,:) = UpdateVarArray2(initParameter,newY,x+dx,r,baseAngle,basePnum,adjPnum,Extra_n,xDist,resFactor,1);
+    inputMatrix(2,:) = UpdateVarArray2(initParameter,newY,x+dx,r,baseAngle,basePnum,adjPnum,Extra_n,xDist,resFactor,2);
+    inputMatrix(3,:) = UpdateVarArray2(initParameter,newY,x+dx,r,baseAngle,basePnum,adjPnum,Extra_n,xDist,resFactor,3);
+    inputMatrix(4,:) = UpdateVarArray2(initParameter,newY,x+dx,r,baseAngle,basePnum,adjPnum,Extra_n,xDist,resFactor,4);                           
+else        % for the case of 1st run with only one initial condition
+    inputMatrix(1,:) = InitUpdateVarArray2(initParameter,y,x,basePnum,adjPnum,ExplorDir,Extra_n,xDist,1);
+    inputMatrix(2,:) = InitUpdateVarArray2(initParameter,y,x,basePnum,adjPnum,ExplorDir,Extra_n,xDist,2);
+    inputMatrix(3,:) = InitUpdateVarArray2(initParameter,y,x,basePnum,adjPnum,ExplorDir,Extra_n,xDist,3);
+    inputMatrix(4,:) = InitUpdateVarArray2(initParameter,y,x,basePnum,adjPnum,ExplorDir,Extra_n,xDist,4);
+end
+  
+% Displaying results on screen
+disp(['+++++++++++++++   nFit = ' num2str(nFit) '  ++++++++++++++'])
+for i=1:4
+    disp(['y and x values: ' num2str(inputMatrix(i,basePnum)) ' , ' num2str(inputMatrix(i,adjPnum))])
+end
+if nFit>1
+    disp(['r(' num2str(i) ')= ' num2str(r)])
+end
+    

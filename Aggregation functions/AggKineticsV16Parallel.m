@@ -1,0 +1,122 @@
+function [t,M,F,y0t,g0t,xFactor,yFactor,ymax,yLast,gLast,tFirst,tLast,y01,y0end,alarm]=AggKineticsV16Parallel(DataArray,LabNum)
+% Using a combination of Gillespie algorithm and deterministic solutions
+% to investigate protein aggregation kinetics
+%
+% Plots will be saved in current directory
+%
+% Some General Data:
+% Prion cycle ~60 min (Prion biology & disease. p 493)
+% Prion particle per 1 micro meter of membrane table (Prion biology &
+% disease. p 490)   
+%     Startum oriens - axon axolemma  ~0.95 (0.00095 per 1 nm of membrane)
+% Ultrathin Cyrosection, brain slice thickness ~ 100 nm 
+% We get ~95,000 PrPc/nm^2
+% Area of neuron cell membrane ~ 250,000 nm^2
+%
+% v0[cubic micro meters]
+% k's reaction rate constants in [1/(M*s)], [1/s]...
+% y00,p00 in [M]
+%
+% klpf k+ for elongation (monomer attachment) for free aggregates
+% klmf k- for monomer detachment, for free aggregates
+% klpm k+ for elongation (monomer attachment) for membrane bounnd aggregates
+% klmm k- for monomer detachment, for membrane bound aggregates 
+% kap/kam attachment and detachment rates, of aggregates to the membrane
+% kn free aggregates nucleation rate
+% knm membrane aggregation rate
+% kbf free aggregates breakage rate
+% kbm membrane aggregates breakage rate
+% y00 initial concentration of free monomers (A-beta)
+% p00 initial concentration of membrane bound proteins (Prion)
+% rs sequestration rate of membrane bound proteins and aggregates
+% rfp new, free monomers supply rate
+% rp membrane bound proteins production rate
+% n the max length of aggregates
+% m the number of iterations we want to do 
+% v0 the system volume. used to convert concentration and reaction rates to stochastic form
+% "a", the propensities terms calculation
+    % Free aggregates
+    % a1 = cn*y(1)*(y(1)-1)/2;
+    % a2 = clpf*y(1)*y(2:(n-1));
+    % a3 = cbf*y(4:n).*(i-3);
+    % a4 = 2*clmf*y(2:n);
+    % Membrane aggregates
+    % a5 = cap*g0*y(2:n);
+    % a6 = clpm*y(1)*g(2:(n-1));
+    % a7 = cbm*g(4:n).*(i-2)
+    % a8 = clmm*g(2:n);
+    % a9 = cam*g(2:n);
+    % a10 = cnm*g0*y(1)*(y(1)-1)/2
+    % a11 = crs*g(2:n)
+    % a12 = crfmArray(2:n)*y(2:n);    crfmArray= crfm./(2:n)
+    % production and sequestration of membrane and free monomers is handled
+    % deterministically
+    
+    
+% get data from the DataArray
+%    [klpf,klmf    ,klpm,klmm    ,kap ,kam ,kn  ,cnmRatio,kbf  ,kbm  ,y00,p00 ,rs        ,rfm        ,n  ,m    ,x]
+[klpf,klmf,klpm,klmm,kap,kam,kn,cnmRatio,kbf,kbm,y00,p00,rs,rfm,n,m,vScale] = ReactionParameters(DataArray);
+
+% Normalization factor
+% Don't forget to adjust real time accordingly
+
+
+% Include parameters initialization code
+eval('AggKineticsInitializationV16')
+
+% change random numbers stream
+RandStream.setDefaultStream(RandStream('mt19937ar','seed',sum(100*clock)));
+
+% Insert the main loop
+eval('AggKineticsMainLoopV16')
+
+alarm = [LabNum p0 y0];
+
+
+%  Normalizing results - to avoid exponents in plots %
+y1 = max(M);
+y2 = max(F);
+y3 = max(y0t);
+y4 = max(g0t);
+ymax = max([0 y3]);
+yFactor = floor(log10(ymax));   % the 10 power of ymax
+ymax = ymax/(10^yFactor);
+M = M/(10^yFactor);
+F = F/(10^yFactor);
+y0t = y0t/(10^yFactor);
+g0t = g0t/(10^yFactor);
+
+% find good starting point to plot
+timesteps = (t(2:end) - t(1:end-1));
+mintimesteps = min(nonzeros(timesteps));
+timesteps = 3*timesteps/mintimesteps;
+timesteps = log(timesteps);
+firstpos = find(timesteps < (timesteps(1)/3));
+if isempty(firstpos)
+    startPos = 1;
+else
+    startPos = firstpos(1) - 10*(firstpos(1)>10);
+end
+
+startPos = 1;
+
+% Reduce array size
+t = t(startPos:10:end);
+M = M(startPos:10:end);
+F = F(startPos:10:end);
+y0t = y0t(startPos:10:end);
+g0t = g0t(startPos:10:end);
+
+yLast = y(end);
+gLast = g(end);
+tFirst = t(1);
+tLast = t(end);
+
+alarm = [startPos t(1) mintimesteps];
+% Testing the change in monomers levels
+y01 = y0t(1);
+y0end = y0t(end);
+% Testing the amount of monomers in free aggregates
+% y01 = y0t(end);
+% y0end = F(end);
+

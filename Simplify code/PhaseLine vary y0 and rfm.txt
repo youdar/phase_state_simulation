@@ -1,0 +1,7 @@
+# This phase line produced by varying y0 and rfm
+# rs = tFactor/tHour
+# rfm = tFactor/tDay
+# This file was produced by ExplorPhaseSpace6.m
+#----------------------------------------------------------------------------------------------------------------------
+# klpf 	,klmf    ,klpm ,klmm    ,kap  	,kam 	,kn  ,cnmRatio	,kbf  	,kbm  	,y00  	,p00 	,rs  	,rfm 	,n  ,m  ,y0end , F_end
+[1.5e3   3e-8   1.5e3   3e-8	100		5e-7	9.5e-5	1		1.5e-9	1.5e-9	1e-10	2e-9	1e-8	1e-8	500	2e6 ,0     , 0 ]

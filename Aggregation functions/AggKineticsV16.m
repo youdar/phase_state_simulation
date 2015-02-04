@@ -1,0 +1,146 @@
+% Using a combination of Gillespie algorithm and deterministic solutions
+% to investigate protein aggregation kinetics
+%
+% Plots will be saved in current directory
+%
+% Some General Data:
+% Prion cycle ~60 min (Prion biology & disease. p 493)
+% Prion particle per 1 micro meter of membrane table (Prion biology & disease. p 490)   
+%     Startum oriens - axon axolemma  ~0.95 (0.00095 per 1 nm of membrane)
+% Ultrathin Cyrosection, brain slice thickness ~ 100 nm 
+% We get ~95,000 PrPc/nm^2
+% Area of neuron cell membrane ~ 250,000 nm^2
+%
+% v0[qubic micro meters]
+% k's reaction rate constants in [1/(M*s)], [1/s]...
+% y00,p00 in [M]
+%
+% klpf k+ for elongation (monomer attachment) for free aggregates
+% klmf k- for monomer detachment, for free aggregates
+% klpm k+ for elongation (monomer attachment) for membrane bounded aggregates
+% klmm k- for monomer detachment, for membrane bounnd aggregates 
+% kap/kam attachment and detachment rates, of aggregates to the membrane
+% kn free aggregates nucleation rate
+% knm membrane aggregation rate
+% kbf free aggregates breakage rate
+% kbm membrane aggregates breakage rate
+% y00 initial concentration of free monomers (A-beta)
+% p00 initial concentration of membrane bound proteins (Prion)
+% rs sequestration rate of membrane bound proteins and aggregates
+% rfp new, free monomers supply rate
+% rp membrane bound proteins production rate
+% n the max length of aggregates
+% m the number of iterations we want to do 
+% v0 the system volume. used to convert concentration and reaction rates to stochastic form
+% "a", the propensities terms calculation
+    % Free aggregates
+    % a1 = cn*y(1)*(y(1)-1)/2;
+    % a2 = clpf*y(1)*y(2:(n-1));
+    % a3 = cbf*y(4:n).*(i-3);
+    % a4 = 2*clmf*y(2:n);
+    % Membrane aggregates
+    % a5 = cap*g0*y;
+    % a6 = clpm*y(1)*g(2:(n-1));
+    % a7 = cbm*g(4:n).*(i-2)
+    % a8 = clmm*g(2:n);
+    % a9 = cam*g(2:n);
+    % a10 = cnm*g0*y(1)*(y(1)-1)/2
+    % a11 = crs*g(2:n)
+    % a12 = crfmArray(2:n)*y(2:n);    crfmArray= crfm./(2:n)
+    % production and sequestration of membrane and free monomers is handled
+    % deterministically
+
+
+
+clc         % Clear work space
+close all   % Close all figures
+clear       % Clear all variables
+
+% Input reaction parameters
+eval('AggKineticsV16Input')
+% Include parameters initialization code
+eval('AggKineticsInitializationV16')
+% Display data
+eval('AggKineticsDisplayDataV16')
+
+if a0==0
+    disp('Warning - a0=0 !!!!')
+end
+    
+tic;
+
+% Insert the main loop
+eval('AggKineticsMainLoopV16')
+
+rtime = toc;
+disp(['Program run time' num2str(rtime)])
+
+tMax = t(end);
+
+disp (['treal = ' num2str(treal)])
+disp ('+++++++++++++++++++++++++++++')
+disp (['y(end) = ' num2str(y(end))])
+disp (['g(end) = ' num2str(g(end))])
+disp ('+++++++++++++++++++++++++++++')
+
+
+%  Normalizing results - to avoid exponents in plots %
+y1 = max(M);
+y2 = max(F);
+y3 = max(y0t);
+y4 = max(g0t);
+
+% ymax = max([y1 y2 y3 y4]);
+ymax = max([y2 y3]);
+yFactor = floor(log10(ymax));   % the 10 power of ymax
+ymax = ymax/(10^yFactor);
+M = M/(10^yFactor);
+F = F/(10^yFactor);
+y0t = y0t/(10^yFactor);
+g0t = g0t/(10^yFactor);
+
+figure()
+h = gcf;
+[OT,startPos] = AggKineticsV16plotTimeStrat(t);
+% plot(t(1:10:end),M(1:10:end),'--',t(1:10:end),F(1:10:end),'-',t(1:10:end),y0t(1:10:end),'-.',t(1:10:end),g0t(1:10:end),':',t(1:10:end),inagg(1:10:end),'.y');
+% legend('Membrane','Free','A-Beta','PrPc','Sequestered','Location','NEO');
+% plot(t(1:10:end),M(1:10:end),'--',t(1:10:end),F(1:10:end),'-',t(1:10:end),y0t(1:10:end),'-.',t(1:10:end),g0t(1:10:end),':');
+% legend('Membrane','Free','A-Beta','PrPc','Location','NEO');
+plot(t(1:10:end),y0t(1:10:end),'--',t(1:10:end),F(1:10:end),'-',t(1:10:end),M(1:10:end),'-.',[OT,OT],[0,ymax]);
+legend('A-Beta','Free','Membrane','Location','NEO');
+title('Total momomers in aggregates');
+%plot label
+xlabel(['Time  x10^{ ' num2str(xFactor) '} [Days]']);
+ylabel(['Monomers concentration  x10^{ ' num2str(yFactor) '}[M]']);
+
+
+% ymax = max([M F y0t]);
+ylim([0 ymax*1.05]);
+xlim([0 t(end)]);
+% xlim([t(startPos) t(end)]);
+
+% set(gca,'XTick',0:5:treal);
+% set(gca,'XTickLabel',num2str(0:5:treal));
+% (klpf,klmf,klpm,klmm,kap,kam,kn,knm,kbf,kbm,y00,p00,rs,rfm,n,m,v0)
+str1 = sprintf('klpf=%.2g, klmf=%.2g \nklpm=%.2g, klmm=%.2g ',klpf,klmf,klpm,klmm);
+str2 = sprintf('\nkap=%.2g, kam=%.2g \nkn=%.2g, cnmRatio=%.2g',kap,kam,kn,cnmRatio);
+str3 = sprintf('\nkbf=%.2g, kbm=%.2g  \ny=%.2g, p=%.2g',kbf,kbm,y00,p00);
+str4 = sprintf('\nrs=%.2g , nrfm=%.2g,',rs,rfm);
+str5 = sprintf('\nn=%.2g, m=%.2g \nv0=%.2g',n,m,v0);
+str6 = sprintf('\ny0=%.2g, p0=%.2g',y0,p0);
+str7 = sprintf('\n\nRun time: %g \nReal Time: %g',rtime,treal);
+plottext = [str1 str2 str3 str4 str5 str6 str7];
+%gtext(plottext)
+Ypos = ymax*0.4;
+Xpos = t(end)*1.05;
+text(Xpos,Ypos,plottext)
+%filename = ['AggKin plot ' datestr(clock) '.jpg'];
+%fname = sprintf('y0=%.2g p0=%.2g kbm=%.2g klmm=%.2g kam=%.2g',y0,p0,kbm,klmm,kam);
+fname = sprintf('y00=%.2g x=%.2g',y00,vScale);
+% filename = ['AggKin 3' fname '.jpg'];
+% filename = strrep(filename,':','-');
+%saveas(h,filename);
+[testResult,testValue] = TestABetaValue(y0t,t);
+disp(['testResult = ' num2str(testResult)])
+disp(['testValue = ' num2str(testValue)])
+

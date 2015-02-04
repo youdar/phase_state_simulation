@@ -1,0 +1,31 @@
+% collect information on onset time variation
+
+clc         % Clear work space
+close all   % Close all figures
+clear       % Clear all variables
+    
+    
+    N = 1;
+    onsettime = zeros(1,N);
+    for i=1:N
+        % Input reaction parameters
+        eval('AggKineticsV16Input')
+        % Include parameters initialization code
+        eval('AggKineticsInitializationV16')
+        % Display data
+        eval('AggKineticsDisplayDataV16')
+        disp('~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~')
+        disp(['Iteration #: ' num2str(i)])
+        % Insert the main loop
+        eval('AggKineticsMainLoopV16')
+        ymax = max([y0t,F]);
+        [tj,j] = AggKineticsV16plotTimeStrat(t);
+        figure()
+        plot(t,y0t,'--',t,F,'-',t(1:10:end),M(1:10:end),'-.',[tj,tj],[0,ymax]);
+        drawnow
+        onsettime(i) = tj*(10^xFactor);
+    end
+
+
+
+

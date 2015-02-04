@@ -1,0 +1,9 @@
+function FitVal = GetFitParameter(gof)
+
+
+
+if isnan(gof.adjrsquare)
+    FitVal = 1;
+else
+    FitVal = gof.adjrsquare;
+end

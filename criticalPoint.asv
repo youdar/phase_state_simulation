@@ -1,0 +1,163 @@
+% critical point locator
+%
+% for each ratio y0/g0 start at some parameter value, where aggregation
+% accures, and graduatly reduce parameter value, until the point that no
+% aggregation accours. keep the pair[(y0/g0),parameter value]
+% Run again for another value of y0/g0
+% Then plot all the pairs [(y0/g0),parameter value]
+
+clc         % Clear work space
+close all   % Close all figures
+clear       % Clear all variables
+
+
+tDay = 60*60*24;    % Seconds in a day
+tHour = 3600;       % Seconds in one hour
+tFactor = 1e-6;     % Time factor for simulation
+
+if matlabpool('size')==0
+    matlabpool open 4               % allocate local MATLAB labs for parallel functions execution  
+else
+    matlabpool('close')
+    matlabpool open 4 
+end  
+
+labSize = matlabpool('size');   % find out how many processors we use
+disp(['Doing ' num2str(labSize) ' runs at paralell'])
+
+% Make sure that the number of rows input matrix fit the number of labSize
+% the first column in the inputMatrix is the paralell lab number
+
+x = 1; tn = 5e5;
+
+
+% % [3.4e8  ,2.45e-2  ,3.4e8  ,2.45e-2  ,0.5e5 ,2.5e-4 ,2e-5,  1,2e-6  ,2e-6 ,2e-10 ,2e-9 ,2.5e-5 	,2e-5,500,4e6,x];
+% % %    [3e4     ,2e-6     ,3e4     ,2e-6     ,1e2      ,2e-7      ,2e-5,1       ,2e-10,2e-10
+% % %    [klpf    ,klmf     ,klpm    ,klmm     ,kap      ,kam       ,kn,cnmRatio,kbf   ,kbm     ,y00    ,p00  ,rs        ,rfm ,n  ,m  ,x]
+% % a1 = [x1*2e8  ,y1*2e-2  ,x1*2e8  ,y1*2e-2  ,k1*0.5e5 ,k1*2.5e-4 ,n1*2e-5,  1 ,z1*2e-6 ,z1*2e-6 ,2e-010 ,0 ,f1*2.5e-5 ,f1*2e-5,500,tn,x];
+% % a2 = [x2*2e8  ,y2*2e-2  ,x2*2e8  ,y2*2e-2  ,k2*0.5e5 ,k2*2.5e-4 ,n2*2e-5,  1 ,z2*2e-6 ,z2*2e-6 ,2e-010 ,0 ,f2*2.5e-5 ,f2*2e-5,500,tn,x];
+% % a3 = [x3*2e8  ,y3*2e-2  ,x3*2e8  ,y3*2e-2  ,k3*0.5e5 ,k3*2.5e-4 ,n3*2e-5,  1 ,z3*2e-6 ,z3*2e-6 ,2e-010 ,0 ,f3*2.5e-5 ,f3*2e-5,500,tn,x];
+% % a4 = [x4*2e8  ,y4*2e-2  ,x4*2e8  ,y4*2e-2  ,k4*0.5e5 ,k4*2.5e-4 ,n4*2e-5,  1 ,z4*2e-6 ,z4*2e-6 ,2e-010 ,0 ,f4*2.5e-5 ,f4*2e-5,500,tn,x];
+% 
+% x1 = 5.20e6; y1 = 4.45e-5; z1 = 1.0e-7;f1=1;
+% x1 = 3.9e5; y1 = 3.0e-5; k1 = 100; r1 = 2.50e-6; z1 = 0.7e-9;f1=5e-3;
+% x2 = 3.9e5; y2 = 3.0e-5; k2 = 100; r2 = 2.50e-6; z2 = 0.7e-9;f2=5e-3;
+% x3 = 3.9e5; y3 = 3.4e-5; k3 = 100; r3 = 2.50e-6; z3 = 0.7e-9;f3=5e-3;
+% x4 = 3.9e5; y4 = 3.4e-5; k4 = 100; r4 = 2.50e-6; z4 = 0.7e-9;f4=5e-3;
+% x3 = 3e4; y3 = 2e-8; z3 = 2e-8;f3=1;
+% x4 = 3e3; y4 = 2e-7; z4 = 2e-7;f4=1;
+% x1 = 3.5e2; y1 = 2.1e-8; k1 = 1.0e2; r1 = 1.0e-7; z1 = 2.1e-9;f1=1;   
+% x2 = 3.5e2; y2 = 2.1e-8; k2 = 1.0e2; r2 = 1.0e-7; z2 = 2.1e-9;f2=1;
+% x3 = 3.5e2; y3 = 2.1e-8; k3 = 1.0e2; r3 = 1.0e-7; z3 = 2.1e-9;f3=1;
+% x4 = 3.5e2; y4 = 2.1e-8; k4 = 1.0e2; r4 = 1.0e-7; z4 = 2.1e-9;f4=1;
+x1 = 1.5e3; y1 = 3.0e-8; k1 = 1.0e2; r1 = 5.0e-7; z1 = y1/20;f1=1;   
+x2 = 1.5e3; y2 = 3.0e-8; k2 = 1.0e2; r2 = 5.0e-7; z2 = y2/20;f2=1;
+x3 = 1.5e3; y3 = 3.0e-8; k3 = 1.0e2; r3 = 5.0e-7; z3 = y3/20;f3=1;
+x4 = 1.5e3; y4 = 3.0e-8; k4 = 1.0e2; r4 = 5.0e-7; z4 = y4/20;f4=1;
+% x1 = 3.0e3; y1 = 1.9e-7; k1 = 1.0e2; r1 = 1.0e-7; z1 = 2.1e-9;f1=1;
+% x2 = 3.0e3; y2 = 1.9e-7; k2 = 1.0e2; r2 = 1.0e-7; z2 = 2.1e-9;f2=1;
+% x3 = 3.0e3; y3 = 1.9e-7; k3 = 1.0e2; r3 = 1.0e-7; z3 = 2.1e-9;f3=1;
+% x4 = 3.0e3; y4 = 1.9e-7; k4 = 1.0e2; r4 = 1.0e-7; z4 = 2.1e-9;f4=1;
+% 
+%    [klpf  ,klmf   ,klpm   ,klmm ,kap  ,kam  ,kn,cnmRatio ,kbf ,kbm ,y00   ,p00   ,rs     ,rfm  ,n   ,m ,x]
+% ~70%
+% a1 = [x1    ,y1     ,x1     ,y1   ,k1   ,r1   ,2.00e-3,1   ,z1  ,z1 ,2.0e-10 ,2e-9  ,f1*2.5e-9 ,f1*2e-9 ,500 ,tn,x];
+% Critical level
+% a1 = [x1    ,y1     ,x1     ,y1   ,k1   ,r1   ,2.00e-3,1   ,z1  ,z1 ,1.37e-10 ,2e-9  ,f1*2.5e-9 ,f1*2e-9 ,500 ,tn,x];
+% a1 = [x1    ,y1     ,x1     ,y1   ,k1   ,r1   ,9.5e-5,1   ,z1  ,z1    ,1.00e-10 ,2e-9  ,f1*1e-8 ,f1*1e-8 ,500 ,tn,x];
+% a2 = [x2    ,y2     ,x2     ,y2   ,k2   ,r2   ,9.5e-5,1   ,z2  ,z2    ,1.05e-10 ,2e-9  ,f2*1e-8 ,f2*1e-8 ,500 ,tn,x];
+% a3 = [x3    ,y3     ,x3     ,y3   ,k3   ,r3   ,9.5e-5,1   ,z3  ,z3    ,1.10e-10 ,2e-9  ,f3*1e-8 ,f3*1e-8 ,500 ,tn,x];
+% a4 = [x4    ,y4     ,x4     ,y4   ,k4   ,r4   ,9.5e-5,1   ,z4  ,z4    ,1.15e-10 ,2e-9  ,f4*1e-8 ,f4*1e-8 ,500 ,tn,x];
+ 
+% a1 = [3.4e6 ,2.35e-2 ,3.4e6  ,2.35e-2  ,k1*0.5e5 ,k1*2.5e-4 ,2e-3,1,2e-8  ,2e-8  ,2e-10 ,2e-9  ,2.5e-5 ,2e-5 ,500 ,tn,x];
+% a2 = [3.4e5 ,2.35e-3 ,3.4e5  ,2.35e-5  ,k2*0.5e5 ,k2*2.5e-4 ,2e-3,1,2e-8  ,2e-8  ,2e-10 ,2e-9  ,2.5e-5 ,2e-5 ,500 ,tn,x];
+% a3 = [3.4e6 ,2.35e-4 ,3.4e6  ,2.35e-4  ,k3*0.5e5 ,k3*2.5e-4 ,2e-3,1,2e-8  ,2e-8  ,2e-10 ,2e-9  ,2.5e-5 ,2e-5 ,500 ,tn,x];
+% a4 = [3.4e5 ,2.35e-5 ,3.4e5  ,2.35e-5  ,k4*0.5e5 ,k4*2.5e-4 ,2e-3,1,2e-8  ,2e-8  ,2e-10 ,2e-9  ,2.5e-5 ,2e-5 ,500 ,tn,x];
+      1.5e3 3e-8 1.5e3   3e-8 100 5e-7	 9.5e-5	1	1.5e-9	1.5e-9	2e-10	2e-9	1e-8	1e-8	500	1.4e6
+a1 = [1500 3e-008 1500 3e-008 100 5e-007 9.5e-005 1 1.5e-009 1.5e-009 9.3979269023968e-010 2e-009 1e-008 4.08879794180353e-008 500 6000000 1];
+a2 = [1500 3e-008 1500 3e-008 100 5e-007 9.5e-005 1 1.5e-009 1.5e-009 9.62417055748712e-010 2e-009 1e-008 4.1519663053172e-008 500 6000000 1];
+a3 = [1500 3e-008 1500 3e-008 100 5e-007 9.5e-005 1 1.5e-009 1.5e-009 1.05792747898471e-009 2e-009 1e-008 4.39903075788765e-008 500 6000000 1];
+a4 = [1500 3e-008 1500 3e-008 100 5e-007 9.5e-005 1 1.5e-009 1.5e-009 1.15486459835007e-009 2e-009 1e-008 4.55999275472684e-008 500 6000000 1];
+
+% a3 = [4.30e6    ,2.60e-6     ,4.30e6     ,2.60e-6   ,5.0e4 ,2.50e-4 ,2.80e-2,1   ,6.0e-8  ,6.0e-8  ,2e-10 ,2e-9  ,f3*2.5e-5 ,f3*2e-5 ,500 ,tn,x];
+
+inputMatrix(1,:) = a1;
+inputMatrix(2,:) = a2;
+inputMatrix(3,:) = a3;
+inputMatrix(4,:) = a4;
+
+RowNum = numel(inputMatrix,:,1);        % Makeing sure we send the right number of data sets
+
+if RowNum ~= labSize
+    disp('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!')
+    disp('There is a probleb withthe number of labs')
+    disp('and the number of data sets')
+    disp('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!')
+end
+
+tic;
+
+spmd
+    [t,M,F,y0t,g0t,xFactor,yFactor,ymax,yLast,gLast,tFirst,tLast,y01,y0end,alarm] = AggKineticsV16Parallel(inputMatrix(labindex,:),labindex);
+end
+
+RunTime = toc;
+
+for i=1:labSize
+    figure(i)
+    plot(t{i},y0t{i},'-.',t{i},M{i},'--',t{i},F{i},'-');
+    legend('ABeata','Membrane','Free','Location','NEO');
+    % plot label
+    xlabel(['Time  x10^{ ' num2str(xFactor{i}) '} [Days]']);
+    ylabel(['Aggregates monomers concentration  x10^{ ' num2str(yFactor{i}) '}[M]']);
+    title(['Plot from lab number ' num2str(i)])
+    % plot axis
+    ylim([0 ymax{i}*1.5]);
+    xlim([tFirst{i} tLast{i}]);  
+%     xlim([0 tLast{i}]);  
+    % calculate the precent of A-beta that are in aggregates
+    % y0Ratio = round(100*(y01{i}-y0end{i})/y01{i});
+%     y0Ratio = 100*y0end{i}/(y0end{i}+y01{i});
+    y0Ratio = 100*y0end{i}/y01{i};
+    
+%     figure(i+4)
+%     plot(t{i},y0t{i},'-.');
+%     title('Free A-\beta plot');
+    
+    disp ('+++++++++++++++++++++++++++++')
+    disp (['Sum(M) : ' num2str(sum(M{i}))])
+    disp (['Alarm : ' num2str(alarm{i})])
+    disp (['Run number : ' num2str(i)])
+    disp (['y(end) = ' num2str(yLast{i})])
+    disp (['g(end) = ' num2str(gLast{i})])
+%     disp (['The precent of A-Beta in aggregates is ' num2str(y0Ratio) '%'])
+    disp (['The precent of A-Beta change ' num2str(y0Ratio) '%'])
+    if alarm{i}
+        disp ('Small number alarm!!!  results might vary segnificantly at each run')
+    end
+    disp ('+++++++++++++++++++++++++++++')
+    
+%     % Plot text 
+%     str1 = sprintf('klpf=%.2g, klmf=%.2g \nklpm=%.2g, klmm=%.2g ',inputMatrix(i,1:4));
+%     str2 = sprintf('\nkap=%.2g, kam=%.2g \nkn=%.2g, cnmRatio=%.2g',inputMatrix(i,5:8));
+%     str3 = sprintf('\nkbf=%.2g, kbm=%.2g  \ny=%.2g, p=%.2g',inputMatrix(i,9:12));
+%     str4 = sprintf('\nrs=%.2g ,rp=%.2g',inputMatrix(i,13:14));
+%     str5 = sprintf('\nn=%.2g, m=%.2g \nx=%.2g',inputMatrix(i,15:17));
+%     str6 = sprintf('\ny0=%.2g, p0=%.2g',y0,p0);
+%     plottext = [str1 str2 str3 str4 str5];
+%     Ypos = ymax{i}*0.4;
+%     Xpos = tLast{i}*1.05;
+%     text(Xpos,Ypos,plottext)
+
+    % Saving figure
+%     h = gcf;
+%     fname = sprintf('Figure from lab %i',i);
+%     filename = [fname '.jpg'];
+%     filename = strrep(filename,':','-');
+%     saveas(h,filename);
+end
+
+
+% matlabpool close
+
+disp(['run time = ' num2str(RunTime)])

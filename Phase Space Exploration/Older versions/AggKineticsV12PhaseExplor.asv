@@ -1,0 +1,810 @@
+function [yLast,gLast,tLast,TestFlag,TestFlagValue,alarm,t,ft]=AggKineticsV12PhaseExplor(DataArray)
+% Using a combination of Gillespie algorithm and deterministc solutions
+% to investigate protein aggregation kinetics
+%
+% Plots will be saved in current directory
+%
+% Some General Data:
+% Prion cycle ~60 min (Prion biology & diseas. p 493)
+% Prion particle per 1 micro meter of membrane table (Prion biology & diseas. p 490)   
+%     Startum oriens - axon axolemma  ~0.95 (0.00095 per 1 nm of membrane)
+% Ultrathin Cyrosection, brain slice thinkness ~ 100 nm 
+% We get ~95,000 PrPc/nm^2
+% Area of neuron cell membrane ~ 250,000 nm^2
+%
+% v0[qubic micro meters]
+% k's reaction rate constants in [1/(M*s)], [1/s]...
+% y00,p00 in [M]
+%
+% klpf k+ for elongation (monomer attachment) for free aggregates
+% klmf k- for monomer dettachment, for free aggregates
+% klpm k+ for elongation (monomer attachment) for membrane bounnd aggregates
+% klmm k- for monomer dettachment, for membrane bounnd aggregates 
+% kap/kam attachemnt and dettachment rates, of aggregates to te membrane
+% kn free aggregates nucleation rate
+% knm mambrane aggregation rate
+% kbf free aggregates brakage rate
+% kbm mambrane aggregates brakage rate
+% y00 initial concentration of free monomers (A-beta)
+% p00 initial concentration of membrane bound proteins (Prion)
+% rs sequestration rate of membrane bound proteins and aggregates
+% rfp new, free monomers supply rate
+% rp membrane bound proteins production rate
+% bn burst size, the numbers of new proteins that enters to the system at
+%                              each production step
+% n the max length of aggregates
+% m the number of iterations we want to do 
+% v0 the system volume. used to convert concentration and reaction rates to
+%                             stochastic form
+
+
+
+
+% "a" terms calculation
+    % Free aggregates
+    % a1 = cn*y(1)*(y(1)-1)/2;
+    % a2 = clpf*y(1)*y(2:(n-1));
+    % a3 = cbf*y(4:n).*(i-3);
+    % a4 = 2*clmf*y(2:n);
+    % Membrane aggregates
+    % a5 = cap*g0*y;
+    % a6 = clpm*y(1)*g(1:(n-1));
+    % a7 = cbm*g(3:n).*(i-2)
+    % a8 = clmm*g(2:n);
+    % a9 = cam*g(1:n);
+    % a10 = cnm*g0*y(1)*(y(1)-1)/2
+
+    
+    % Membrane protein sequstration - seperate process
+    % Membrane aggregates sequstration - seperate process    
+    % Out-flow - seperate process;
+    % In-flow of free monomers and membrane single proteins is done
+    % deterministically. since they are fixed rates and happen constantly
+    %
+    % out-flow is done by selecting one size aggregate to be cleared at
+    % each time step, according to the probabilty of the 
+    
+% change random numbers stream
+RandStream.setDefaultStream(RandStream('mt19937ar','seed',sum(100*clock)));
+
+% get data from the DataArray
+
+klpf = DataArray(1); 
+klmf = DataArray(2);
+klpm = DataArray(3);
+klmm = DataArray(4);
+kap = DataArray(5);
+kam = DataArray(6);
+kn = DataArray(7);
+cnmRatio = DataArray(8);        % cnmRatio = (cnm equivalent)/cn = cnm*p0/cn
+kbf = DataArray(9);
+kbm = DataArray(10);
+y00 = DataArray(11);
+p00 = DataArray(12);
+rs = DataArray(13);
+rfm = DataArray(14);
+n = DataArray(15);
+m = DataArray(16);
+
+% Normalization factor
+% Don't forget to adjust real time accordingly
+
+% Convert to Gillespie and Normalize parameters
+%(klpf,klmf,klpm,klmm,kap,kam,kn,knm,kbf,kbm,y0,p0,rs,n,m,v0)
+v0 = 1e15;          % in nm^3
+na = 6.022e23;      % Avogadro Num
+v1 = v0*1e-24;      % Convert volume from (nm)^3 to liters
+v = v1*na;          % facilitate conversion of # of mols to # of particles
+alarm  = 0;
+
+clpf = klpf/v;
+clmf = klmf;
+clpm = klpm/v;
+clmm = klmm;
+cap = kap/v;
+cam = kam;
+cn = 2*kn/v;        % free nucleation
+cbf = kbf;          % Free aggregates breaking rate
+cbm = kbm;          % Membrane aggregates breaking rate
+y0 = round(v*y00);  % Convert concentration to number of particles in v0
+p0 = round(v*p00);  % Convert concentration to number of particles in v0
+% rp = rs*p00;
+% non-Gillespie parameters
+crs = rs;       % Prion Sequestration rate
+crp = crs*p0;   % Production rate        
+crfm = rfm;     % Free aggregates out flow rate
+crfp = crfm*y0; % flow supply of free monomers (crfp = crfm*y0)v^2*rfm*y00 = v*rfm*y0
+
+% automating the scaling
+vScale = 1;
+% minN = min(y0,p0);
+% if minN < 5e5
+%     vScale = minN/1e6;      % increase the smaller number of particles to 1e6
+%     alarm = 1;              % Raise scale down alarm
+% elseif minN > 2e6
+%     vScale = 1e6/minN;      % reduce the number of particles if the minN is larger than 2e6
+%     alarm = 2;              % Raise scale up alarm
+% end
+
+
+
+% Scaling
+clpf = clpf*vScale;         % a2 = clpf*y(1)*y(2:(n-1));
+% clmf Stay the same        % a4 = 2*clmf*y(2:n);
+clpm = clpm*vScale;         % a6 = clpm*y(1)*g(1:(n-1));
+% clmm = Stay the same      % a8 = clmm*g(2:n);
+cap = cap*vScale;           % a5 = cap*g0*y;
+% cam Stay the same         % a9 = cam*g(1:n)
+% cn : update at the calculation        % a1 = cn*y(1)*(vScale*y(1)-1)/2;  
+% cbf Stay the same                     % a3 = cbf*y(4:n).*(i-3);     
+% cbm Stay the same                     % a7 = cbm*g(3:n).*(i-2)    
+y0 = round(y0/vScale);      
+p0 = round(p0/vScale);     
+% crs Stay the same
+crp = crp/vScale;           
+% crfm = Stay the same
+crfp = crfp/vScale;
+% t = t*v/3600;   Convert to real time
+
+if p0~=0
+    cnm = vScale*cnmRatio*cn/p0;        % Note the scaling
+    % a10 = vScale*cnm*g0*y(1)*(vScale*y(1)-1)/2
+else
+    cnm = 0;
+end
+
+
+% Initialize parameters
+
+t = zeros(1,m);         % collect the time steps
+F = zeros(1,m);         % Collect the amount of monomers in the free aggregates at each time step
+M = zeros(1,m);         % Collect the amount of monomers in the membrane aggregates at each time step
+y0t = zeros(1,m);       % the number of free monomers
+g0t = zeros(1,m);       % the number of membrane single proteins
+inagg = zeros(1,m);     % Collect data on sequestered aggregates
+y = zeros(1,n);         % The number of free aggregates of different length
+g = zeros(1,n);         % The number of mambrane aggregates of different lengt
+dyin = 0;               % initialize parameters for the deterministic process
+dg0in = 0;              % initialize parameters for the deterministic process
+aa = zeros(1,10);       % Collect the propensity of each region
+dfy = zeros(1,n);       % Collect the fractions of the specific y
+dfg = zeros(1,n);       % Collect the fractions of the specific g
+dfg0 = 0;               % Collect the fractions of the g0
+ 
+
+% % for testing
+% ynt = zeros(1,m);
+% ynt(1) = y0;
+
+
+% nc = 2;               % Critical nucleation length - for membrane attachment
+y(1) = y0;              % initial amount of monomers
+yn = y(1);              % track the total number of free monomers and aggregates
+g0 = p0;                % initial amount of monomers 
+gn = g0;                 % track the total number of membrane aggregates
+y0t(1)=y(1);            % tracking free monomers as a function of time
+g0t(1)=g0;              % tracking membrane bound monomers as a function of time
+rst = [1 2 4 2 2 1 3 2 1 1];           % the start i in each reaction region
+re = [1 (n-1) n n n (n-1) n n n 1];   % the end i in each reaction region
+
+
+% initial values for the different reaction propensities
+% Do not include in/out-flow reactions in the Gillespie process  
+% a(1),a(10) are length 1
+a = zeros(10,n);
+      
+% None zero initial values
+a(1,1) = cn*y(1)*(vScale*y(1)-1)/2;
+a(10,1) = cnm*g0*y(1)*(vScale*y(1)-1)/2;
+
+% Sum all the none zero values
+aa(1) = a(1,1);
+aa(10) = a(10,1);
+a0 = sum(aa);
+
+
+% TestFlag = 0;       % Counts the number of time steps that the test was positive
+if y00<0 || p00<0
+    PositiveFlag = 0;
+else
+    PositiveFlag = 1;
+end
+
+if PositiveFlag
+    for i=2:m
+        % Add time step
+        dt = log(1/rand)/a0;
+        t(i) = t(i-1)+ dt;   
+
+        % Get the reaction type number                           
+        r = rand;           % Random number (0,1)
+        rn = 1;             % the reaction number in a (1 to 10)
+        s = aa(rn)/a0;      % accomulating the propensities
+        while s < r
+            rn = rn + 1;
+            s = s + aa(rn)/a0;  
+        end
+        % find the reaction within the reaction type
+        % agn1 is the possition in the y or g arrays
+        agn1 = rst(rn);        % the first j in the correct region
+        if rn~=1 && rn~=10                            
+            s = s - aa(rn)/a0 + a(rn,agn1)/a0;      % return value to begining of reaction
+            while s < r   
+                agn1 =agn1 + 1;
+                s = s + a(rn,agn1)/a0; 
+            end
+        end
+
+
+        % The deterministic in-flow
+        % Adjust y(1) and g0 
+        dyin = dt*crfp + dyin;      % add accumulated fraction of monomers
+        dy1 = floor(dyin);          % moving only whole particle
+        dyin = dyin - dy1;          % keeping track of fraction of particles
+
+        % Out-flow calculation
+        ry = yn*rand();     % using random selection according the aggregation number distribution
+        sy = y(1);
+        yi = 1;             % aggregate to be flowing out
+        while sy<ry
+            yi = yi +1;
+            sy = sy + y(yi);
+        end
+
+        % Out-flow calculation -  update y(yi)
+        dfy(yi) = dfy(yi) + dt*y(yi)*crfm;
+        dy2 = floor(dfy(yi));        % the integer number of aggregates or monomers the flow out
+        dfy(yi) = dfy(yi) - dy2;     % update the reminder of the aggregates or monomers, that did not flow out
+        if yi==1
+            y(1) = y(1) + dy1 - dy2;            % Update free monomers number
+        else
+            y(1) = y(1) + dy1;
+            y(yi) = y(yi) - dy2;
+        end
+
+        yn = yn + dy1 - dy2;                % Update number of free particles (aggregates and monomers)
+        if y(yi)<0
+            yn = yn - y(yi);
+            y(yi) = 0;   
+        end
+
+
+        % Membrane protein production
+        dg0in = dt*crp + dg0in;     % add accumulated fraction of membrane proteins
+        dg01 = floor(dg0in);        % moving only whole particle
+        dg0in = dg0in - dg01;       % keeping track of fraction of particles
+        % Membrane sequestration
+        rg = gn*rand();     % using random selection according the aggregation number distribution
+        sg = g0;            % initially
+        gi = 0;             % aggregate to be flowing out
+        while sg<rg % && gi<n
+            gi = gi + 1;
+            sg = sg + g(gi);
+        end
+
+        % update g0 for the in-flow
+        % update g(gi)
+        if gi>0
+            dfg(gi) = dfg(gi) + dt*g(gi)*crs;
+            dg2 = floor(dfg(gi));           % the integer number of aggregates or monomers the flow out
+            g(gi) = g(gi) - dg2;            % update g
+            g0 = g0 + dg01;                 
+            dfg(gi) = dfg(gi) - dg2;        % update the reminder of the aggregates or monomers, that did not flow out
+            if g(gi)<0
+                gn = gn + dg01 - dg2 - g(gi); 
+                inagg(i) = inagg(i-1) + gi*(dg2+g(gi));  
+                g(gi) = 0;
+            else
+                gn = gn + dg01 - dg2; 
+                inagg(i) = inagg(i-1) + gi*dg2;  
+            end 
+
+        else
+            dfg0 = dfg0 + dt*g0*crs;
+            dg2 = floor(dfg0);     % the integer number of aggregates or monomers the flow out
+            g0 = g0 + dg01 - dg2;  % update g0
+            dfg0 = dfg0 - dg2;     % update the reminder of the aggregates or monomers, that did not flow out 
+            inagg(i) = inagg(i-1);
+            if g0<0
+                gn = gn + dg01 - dg2 - g0; 
+                g0 = 0;
+            else
+                gn = gn + dg01 - dg2;
+            end
+        end
+
+        % Calculate the difference in the total amounts
+        % Adjust M and F for the out-flow is done at the end of the cycle
+        dMi = dg2*gi;           
+        dFi = dy2*yi*(yi>1);  
+
+        % Calculate the changes acording to the reaction that took place   
+        switch rn
+            case 1
+                % Calculate y and g
+                if y(1)>2
+                    y(1) = y(1)-2;
+                    yn = yn - 1;
+                    y(2) = y(2)+1;
+                    F(i) = F(i-1)+ 2;
+                    % reaction propensities that need update
+                    % a1 = cn*y(1)*(y(1)-1)/2;  Updated at the end
+                    % a2 = clpf*y(1)*y(2:(n-1));    Updated at the end 
+                    % a4 = 2*clmf*y(2:n);
+                    a(4,2) = clmf*y(2);
+                    aa(4) = sum(a(4,:));
+                    % a5 = cap*g0*y;    Updated at the end
+                    % a6 = clpm*y(1)*g(1:(n-1));      Updated at the end
+                    % a10 = cnm*g0*y(1)*(y(1)-1)/2      Updated at the end
+                else
+                    F(i) = F(i-1);
+                end
+                M(i) = M(i-1); 
+
+            case 2
+                if y(1)>0 && y(agn1)>0
+                    % agn2 is the possition in the y or g arrays
+                    agn2 = agn1+1;
+                    % Calculate y and g
+                    y(agn1) = y(agn1)-1;
+                    y(1) = y(1)-1;
+                    y(agn2) = y(agn2)+1;
+                    F(i) = F(i-1)+ 1;
+                    yn = yn - 1;
+                    % Calculate changes
+                    if agn1>3
+                        % a3 = cbf*y(4:n).*(i-3);
+                        a(3,agn1) = cbf*y(agn1)*(agn1-3);
+                        a(3,agn2) = cbf*y(agn2)*(agn2-3);
+                        aa(3) = sum(a(3,:));
+                    elseif agn2>3
+                        % a3 = cbf*y(4:n).*(i-3);
+                        a(3,agn2) = cbf*y(agn2)*(agn2-3);
+                        aa(3) = sum(a(3,:));
+                    end
+                    % reaction propensities that need update
+                    % a1 = cn*y(1)*(y(1)-1)/2;     Updated at the end
+                    % a2 = clpf*y(1)*y(2:(n-1));    Updated at the end 
+                    % a4 = 2*clmf*y(2:n);
+                    a(4,agn1) = (1+(agn1>2))*clmf*y(agn1);
+                    a(4,agn2) = 2*clmf*y(agn2);
+                    aa(4) = sum(a(4,:));
+                    % a5 = cap*g0*y;    Updated at the end
+                    % a6 = clpm*y(1)*g(1:(n-1));      Updated at the end
+                    % a10 = cnm*g0*y(1)*(y(1)-1)/2      Updated at the end
+                else
+                    F(i) = F(i-1);
+                end
+                M(i) = M(i-1);  
+            case 3
+                if y(agn1)>0
+                    % agn2,3 are the possition in the y or g arrays
+                    agn2 = randi(agn1-3)+1;       % The aggregate can break at any bond, randomly
+                    agn3 = agn1-agn2;
+                    % Calculate y ang g 
+                    y(agn1) = y(agn1)-1;               
+                    y(agn2) = y(agn2)+1;        % y(ii)-> y(jj)+y(11-jj)
+                    y(agn3) = y(agn3)+1;
+                    yn = yn + 1;
+                    % Calculate changes
+                    if agn2~=agn3
+                        % a2 = clpf*y(1)*y(2:(n-1));    Updated at the end 
+                        % a4 = 2*clmf*y(2:n);
+                        a(4,agn3) = (1+(agn3>2))*clmf*y(agn3);
+                        aa(4) = sum(a(4,:));
+                        % a5 = cap*g0*y;    Updated at the end
+                        if agn3>3
+                            % a3 = cbf*y(4:n).*yf;
+                            a(3,agn3) = cbf*y(agn3)*(agn3-3);
+                            aa(3) = sum(a(3,:));
+                        end
+                    end 
+                    if agn2>3
+                        % a3 = cbf*y(4:n).*yf;
+                        a(3,agn2) = cbf*y(agn2)*(agn2-3);
+                        aa(3) = sum(a(3,:));
+                    end          
+                    % reaction propensities that need update
+                    % a2 = clpf*y(1)*y(2:(n-1));    Updated at the end 
+                    % a3 = cbf*y(4:n).*yf; 
+                    a(3,agn1) = cbf*y(agn1)*(agn1-3);
+                    aa(3) = sum(a(3,:));
+                    % a4 = 2*clmf*y(2:n);
+                    a(4,agn1) = 2*clmf*y(agn1);
+                    a(4,agn2) = (1+(agn2>2))*clmf*y(agn2);
+                    aa(4) = sum(a(4,:));
+                    % a5 = cap*g0*y;    Updated at the end
+                end
+                % F(i) does not change
+                F(i) = F(i-1);
+                M(i) = M(i-1);       
+            case 4
+                if y(agn1)>0
+                    % agn2 is the possition in the y or g arrays
+                    agn2 = agn1 - 1;
+                    % Calculate y and g
+                    y(agn1) = y(agn1)- 1;   
+                    y(1) = y(1)+ 1;
+                    y(agn2) = y(agn2)+ 1; 
+                    if agn1>2
+                        F(i) = F(i-1)- 1;
+                    else
+                        F(i) = F(i-1)- 2;
+                    end
+                    yn = yn + 1;
+                    % Calculate changes
+                    if agn1>3
+                        % a3 = cbf*y(4:n).*yf;
+                        a(3,agn1) = cbf*y(agn1)*(agn1-3);
+                        aa(3) = sum(a(3,:));
+                    end
+                    if agn2>3
+                        % a3 = cbf*y(4:n).*yf;
+                        a(3,agn2) = cbf*y(agn2)*(agn2-3);
+                        aa(3) = sum(a(3,:));
+                    end
+                    if agn2>1
+                        % a4 = 2*clmf*y(2:n);
+                        a(4,agn2) = (1+(agn2>2))*clmf*y(agn2);
+                        aa(4) = sum(a(4,:));
+                        % a5 = cap*g0*y;    Updated at the end
+                    end
+                    % reaction propensities that need update 
+                    % a4 = 2*clmf*y(2:n);
+                    a(4,agn1) = (1+(agn1>2))*clmf*y(agn1);
+                    aa(4) = sum(a(4,:));
+                    % a1 = cn*y(1)*(y(1)-1)/2;   Updated at the end
+                    % a2 = clpf*y(1)*y(2:(n-1));    Updated at the end 
+                    % a5 = cap*g0*y;    Updated at the end
+                    % a6 = clpm*y(1)*g(1:(n-1));      Updated at the end
+                    % a10 = cnm*g0*y(1)*(y(1)-1)/2      Updated at the end
+                else
+                    F(i) = F(i-1);
+                end
+                M(i) = M(i-1);    
+            case 5
+                if y(agn1)>0 && g0>0
+                    %Adjust y and g
+                    y(agn1) = y(agn1)- 1;
+                    g0 = g0 - 1;
+                    g(agn1) = g(agn1)+ 1;              
+                    F(i) = F(i-1)-agn1;  % agn1 should be always >1
+                    M(i) = M(i-1)+agn1; 
+                    yn = yn - 1;
+                    % Calculate Changes         
+                    if agn1>3
+                        % a3 = cbf*y(4:n).*yf;
+                        a(3,agn1) = cbf*y(agn1)*(agn1-3);
+                        aa(3) = sum(a(3,:));
+                    end
+                    if agn1>2
+                        % a7 = cbm*g(3:n).*(i-2)
+                        a(7,agn1)= cbm*g(agn1)*(agn1-2);
+                        aa(7) = sum(a(7,:));
+                    end
+                    % reaction propensities that need update
+                    % a2 = clpf*y(1)*y(2:(n-1));    Updated at the end 
+                    % a4 = 2*clmf*y(2:n);
+                    a(4,agn1) = 2*clmf*y(agn1);
+                    aa(4) = sum(a(4,:));
+                    % a5 = cap*g0*y;    Updated at the end
+                    % a6 = clpm*y(1)*g(1:(n-1));      Updated at the end
+                    % a8 = clmm*g(2:n);
+                    a(8,agn1)= clmm*g(agn1);
+                    aa(8) = sum(a(8,:));
+                    % a9 = cam*g(1:n);
+                    a(9,agn1)= cam*g(agn1);
+                    aa(9) = sum(a(9,:));
+                    % a10 = cnm*g0*y(1)*(y(1)-1)/2      Updated at the end
+                else
+                    F(i) = F(i-1);  
+                    M(i) = M(i-1);
+                end  
+            case 6
+                if g(agn1)>0 && y(1)>0
+                    % agn2 is the possition in the y or g arrays
+                    agn2 = agn1 + 1;
+                    % Calculate y and g
+                    g(agn1) = g(agn1)- 1;
+                    y(1) = y(1)- 1;
+                    g(agn2) = g(agn2)+ 1;
+                    M(i) = M(i-1)+ 1;   
+                    yn = yn - 1;
+                    % Calculate changes
+                    if agn1>2
+                        % a7 = cbm*g(3:n).*(i-2)
+                        a(7,agn1)= cbm*g(agn1)*(agn1-2);
+                        a(7,agn2)= cbm*g(agn2)*(agn2-2);
+                        aa(7) = sum(a(7,:));
+                    elseif agn2>2
+                        % a7 = cbm*g(3:n).*(i-2)
+                        a(7,agn2)= cbm*g(agn2)*(agn2-2);
+                        aa(7) = sum(a(7,:));
+                    end
+                    if agn1>1
+                        % a8 = clmm*g(2:n);
+                        a(8,agn1)= clmm*g(agn1);
+                        aa(8) = sum(a(8,:)); 
+                    end
+                    % reaction propensities that need update
+                    % a1 = cn*y(1)*(y(1)-1)/2;     Updated at the end
+                    % a2 = clpf*y(1)*y(2:(n-1));    Updated at the end 
+                    % a6 = clpm*y(1)*g(1:(n-1));      Updated at the end
+                    % a8 = clmm*g(2:n);  agn2>1
+                    a(8,agn2)= clmm*g(agn2);
+                    aa(8) = sum(a(8,:));
+                    % a9 = cam*g(1:n);
+                    a(9,agn1)= cam*g(agn1);
+                    a(9,agn2)= cam*g(agn2);
+                    aa(9) = sum(a(9,:));
+                    % a10 = cnm*g0*y(1)*(y(1)-1)/2      Updated at the end
+                else
+                    M(i) = M(i-1);
+                end
+                F(i) = F(i-1);
+            case 7
+                if g(agn1)>0
+                    % agn2,3 are the possition in the y or g arrays
+                    agn2 = randi(agn1-2);       % The aggregate can break at any bond, randomly (g length)
+                    agn3 = agn1-agn2;           % ang3 relate to the y length
+                    % Calculate y and g
+                    g(agn1) = g(agn1)- 1; 
+                    g(agn2) = g(agn2)+ 1;
+                    y(agn3) = y(agn3)+ 1;  
+                    F(i) = F(i-1)+agn3;
+                    M(i) = M(i-1)-agn3; 
+                    yn = yn + 1;
+                    % Calculate changes
+                    if agn3>3
+                        % a3 = cbf*y(4:n).*yf;
+                        a(3,agn3) = cbf*y(agn3)*(agn3-3);
+                        aa(3) = sum(a(3,:));
+                    end
+                    if agn3>1
+                        % a4 = 2*clmf*y(2:n);
+                        a(4,agn3) = (1+(agn3>2))*clmf*y(agn3);
+                        aa(4) = sum(a(4,:));
+                    end
+                    if agn2>1
+                        % a8 = clmm*g(2:n);
+                        a(8,agn2)= clmm*g(agn2);
+                        aa(8) = sum(a(8,:));
+                    end
+                    if agn2>2
+                        % a7 = cbm*g(3:n).*(i-2)
+                        a(7,agn2)= cbm*g(agn2)*(agn2-2);
+                        aa(7) = sum(a(7,:));
+                    end  
+                    % reaction propensities that need update
+                    % a2 = clpf*y(1)*y(2:(n-1));    Updated at the end  
+                    % a5 = cap*g0*y;    Updated at the end
+                    % a6 = clpm*y(1)*g(1:(n-1));      Updated at the end
+                    % a7 = cbm*g(3:n).*(i-2)
+                    a(7,agn1)= cbm*g(agn1)*(agn1-2);
+                    aa(7) = sum(a(7,:));
+                    % a8 = clmm*g(2:n);
+                    % a8 = clmm*g(2:n);
+                    a(8,agn1)= clmm*g(agn1);
+                    aa(8) = sum(a(8,:));
+                    % a9 = cam*g(1:n);
+                    a(9,agn1)= cam*g(agn1);
+                    a(9,agn2)= cam*g(agn2);
+                    aa(9) = sum(a(9,:));
+                else
+                    F(i) = F(i-1);
+                    M(i) = M(i-1);
+                end 
+            case 8
+                if g(agn1)>0
+                    % agn2 is the possition in the y or g arrays
+                    agn2 = agn1 - 1; 
+                    % Calculate y and g
+                    g(agn1) = g(agn1)- 1;   
+                    g(agn2) = g(agn2)+ 1; 
+                    y(1) = y(1)+ 1;
+                    M(i) = M(i-1)- 1;   
+                    yn = yn + 1;
+                    % Calculate changes
+                    if agn1>2
+                        % a7 = cbm*g(3:n).*(i-2)
+                        a(7,agn1)= cbm*g(agn1)*(agn1-2);
+                        aa(7) = sum(a(7,:));
+                    end
+                    if agn2>2
+                        % a7 = cbm*g(3:n).*(i-2)
+                        a(7,agn2)= cbm*g(agn2)*(agn2-2);
+                        aa(7) = sum(a(7,:));
+                    end
+                    if agn2>1
+                        % a8 = clmm*g(2:n);
+                        a(8,agn2)= clmm*g(agn2);
+                        aa(8) = sum(a(8,:));
+                    end
+                    % reaction propensities that need update
+                    % a1 = cn*y(1)*(y(1)-1)/2;     Updated at the end
+                    % a2 = clpf*y(1)*y(2:(n-1));    Updated at the end    
+                    % a6 = clpm*y(1)*g(1:(n-1));      Updated at the end  
+                    % a8 = clmm*g(2:n);
+                    a(8,agn1)= clmm*g(agn1);
+                    aa(8) = sum(a(8,:));
+                    % a9 = cam*g(1:n);
+                    a(9,agn1)= cam*g(agn1);
+                    a(9,agn2)= cam*g(agn2);
+                    aa(9) = sum(a(9,:));
+                    % a10 = cnm*g0*y(1)*(y(1)-1)/2      Updated at the end
+                else
+                    M(i) = M(i-1);
+                end
+                F(i) = F(i-1);
+            case 9
+                if  g(agn1)>0
+                    % Calculate y and g
+                    y(agn1) = y(agn1)+ 1;
+                    g0 = g0 + 1;
+                    g(agn1) = g(agn1)- 1;
+                    if agn1>1
+                        F(i) = F(i-1)+ agn1;
+                    else
+                        F(i) = F(i-1);
+                    end
+                    M(i) = M(i-1)- agn1;
+                    yn = yn + 1;
+                    % Calculate changes
+                    if agn1>1
+                        % a2 = clpf*y(1)*y(2:(n-1));    Updated at the end 
+                        % a4 = 2*clmf*y(2:n);
+                        a(4,agn1) = (1+(agn1>2))*clmf*y(agn1);
+                        aa(4) = sum(a(4,:));
+                        % a6 = clpm*y(1)*g(1:(n-1));      Updated at the end
+                        % a8 = clmm*g(2:n);
+                        a(8,agn1)= clmm*g(agn1);
+                        aa(8) = sum(a(8,:));
+                    end   
+                    if agn1>3
+                        % a3 = cbf*y(4:n).*yf;
+                        a(3,agn1) = cbf*y(agn1)*(agn1-3);
+                        aa(3) = sum(a(3,:));
+                    end 
+                    if agn1>2
+                        % a7 = cbm*g(3:n).*(i-2)
+                        a(7,agn1)= cbm*g(agn1)*(agn1-2);
+                        aa(7) = sum(a(7,:));
+                    end         
+                    % reaction propensities that need update
+                    % a1 = cn*y(1)*(y(1)-1)/2;     Updated at the end
+                    % a5 = cap*g0*y;    Updated at the end
+                    % a9 = cam*g(1:n);
+                    a(9,agn1)= cam*g(agn1);
+                    aa(9) = sum(a(9,:));
+                    % a10 = cnm*g0*y(1)*(y(1)-1)/2      Updated at the end
+                else
+                    F(i) = F(i-1);
+                    M(i) = M(i-1);
+                end
+            case 10
+                if y(1)>0 && g0>0
+                    %Adjust y and g
+                    y(1) = y(1) - 2;
+                    g0 = g0 - 1;
+                    g(2) = g(2)+ 1;     
+                    M(i) = M(i-1) + 2;   
+                    yn = yn - 2;
+                    % Calculate changes
+                    % reaction propensities that need update
+                    % a1 = cn*y(1)*(y(1)-1)/2;      Updated at the end
+                    % a2 = clpf*y(1)*y(2:(n-1));    Updated at the end 
+                    % a5 = cap*g0*y;    Updated at the end
+                    % a6 = clpm*y(1)*g(1:(n-1));      Updated at the end
+                    % a9 = cam*g(1:n);
+                    a(9,2)= cam*g(2);
+                    aa(9) = sum(a(9,:));
+                else
+                    M(i) = M(i-1);
+                end
+                F(i) = F(i-1);      % monomers are not counted in F
+            otherwise
+                % disp('Problem with the reaction number')   
+        end
+
+        % Out-flow calculation - update all propensities that effected by change in y(yi)   
+        % a3 = cbf*y(4:n).*yf;      (4-n)
+        % a4 = 2*clmf*y(2:n);       (2-n)
+        if yi>3
+            % Update a3,a4
+            % a3 = cbf*y(4:n).*(i-3);
+            a(3,yi) = cbf*y(yi)*(yi-3);
+            aa(3) = sum(a(3,:));
+            % a4 = 2*clmf*y(2:n);
+            a(4,yi) = 2*clmf*y(yi);
+            aa(4) = sum(a(4,:));
+        elseif yi>1
+            % Update a4
+            % a4 = 2*clmf*y(2:n);
+            a(4,yi) = (1+(yi>2))*clmf*y(yi);
+            aa(4) = sum(a(4,:));
+        end
+
+        % for g:
+        % a7 = cbm*g(3:n).*(i-2)    (3-n)
+        % a8 = clmm*g(2:n);         (2-n)
+        % a9 = cam*g(1:n);          (1-n)
+        if gi>2
+            % Update a7,a8,a9
+            % a7 = cbm*g(3:n).*(i-2)
+            a(7,gi)= cbm*g(gi)*(gi-2);
+            aa(7) = sum(a(7,:));
+            % a8 = clmm*g(2:n);
+            a(8,gi)= clmm*g(gi);
+            aa(8) = sum(a(8,:));
+            % a9 = cam*g(1:n);
+            a(9,gi)= cam*g(gi);
+            aa(9) = sum(a(9,:));
+        elseif gi==2
+            % Update a8,a9
+            % a8 = clmm*g(2:n);
+            a(8,gi)= clmm*g(gi);
+            aa(8) = sum(a(8,:)); 
+            % a9 = cam*g(1:n);
+            a(9,gi)= cam*g(gi);
+            aa(9) = sum(a(9,:));
+        end
+
+        % Always update 
+        y0t(i) = y(1);
+        g0t(i) = g0;
+        % reaction propensities that need update
+        % a1 = cn*y(1)*(y(1)-1)/2;  
+        a(1,1) = cn*y(1)*(vScale*y(1)-1)/2;
+        aa(1) = a(1,1);
+        % a2 = clpf*y(1)*y(2:(n-1));
+        a(2,rst(2):re(2))= clpf*y(1)*y(2:(n-1));
+        aa(2) = sum(a(2,:));
+        % a5 = cap*g0*y;
+        a(5,rst(5):re(5))= cap*g0*y(2:end);
+        aa(5) = sum(a(5,:));
+        % a6 = clpm*y(1)*g(1:(n-1));
+        a(6,rst(6):re(6))= clpm*y(1)*g(1:(n-1));
+        aa(6) = sum(a(6,:));
+        % a10 = cnm*g0*y(1)*(y(1)-1)/2
+        a(10,1) = cnm*g0*y(1)*(vScale*y(1)-1)/2;
+        aa(10) = a(10,1); 
+        % Sum propensities
+        a0 = sum(aa);
+        % Total amounts addjustments for out-flow and sequestration
+        M(i) = M(i) - dMi;
+        F(i) = F(i) - dFi;
+    end
+    % test results
+    % Test how many of the last 500 steps had segnificant aggregation    
+%     TestVal = 100*F(end-500:end)/(F(end-500:end)+y0t(end-500:end));   
+    [TestFlag,TestFlagValue] = TestABetaValue(y0t,t);
+%         [TestFlag,TestFlagValue] = TestAggValue(F,t);
+    %  I take out the last term since in high flow rates it can cause
+    %  problems
+else
+    TestFlag = 1;                   % Test fails -> TestFlag=1
+    TestFlagValue = 1;
+end
+
+
+
+% Real world time: treal = t(m)*v/3600;
+t = t/3600;      % Covert Gillespie time to real time 
+% ft = F*vScale/v;
+ft = y0t*vScale/v;
+% convert concentration
+% F = F*vScale/v;
+% M = M*vScale/v;
+% y0t = y0t*vScale/v;
+% g0t = g0t*vScale/v;
+
+% Reduce array size
+t = t(1:10:end);
+ft = ft(1:10:end);
+
+yLast = y(end);
+gLast = g(end);
+tLast = t(end);
+
+
+end

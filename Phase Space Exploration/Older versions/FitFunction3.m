@@ -1,0 +1,58 @@
+function [nFit,fitParameter,fittedFun,regularSol,ExplorDir,r,baseAngle]=FitFunction3(i,x,y,xFactor,yFactor)
+
+% Find the best function to predict the next point
+% do not use more that 6 points
+% set default values
+yy = y/yFactor;
+xx = x/xFactor;
+testvalue = 0.97;
+fitParameter = 0;            % adjrsquare
+nFit = 1;
+baseAngle = pi/2; 
+fittedFun = '';
+regularSol = 1;
+ExplorDir = 1;
+minPoints = 3;      % The minimum number of points we want to consider for the linear fit is minPoints + 1
+
+if i>minPoints
+    for j=(i-minPoints):-1:1
+        % Start with linear fit
+        [TempFun,gof]=fit(yy(j:i),xx(j:i),'poly1');
+        TempfitParameter = abs(GetFitParameter(gof));
+        
+        if TempfitParameter > testvalue
+            fitParameter = TempfitParameter;
+            fittedFun = TempFun;
+            nFit = i-j+1;
+            % check if the line is close to horizontal, if yes use horizontal solution
+            if sum(yy(i)==yy(j:i))~=(nFit)
+                regularSol = 1; 
+            else                    % we have a stright horizontal line  
+                regularSol = 0;
+
+            end
+        end
+    end
+    % Calculate dy
+    dy1 = y(i)-y(i-nFit+1);
+    ExplorDir = sign(dy1) + (dy1==0);
+    dy = getdy(ExplorDir,y(i),dy1,yFactor,fittedFun,regularSol);
+    % Calculate baseAngle
+    dyy = dy/yFactor;                                               % we evaluated the function with factorized arrays values
+    if regularSol
+        newX = feval(fittedFun,(y(i)+dy)/yFactor)*xFactor;          % get the x value
+        dx = newX - x(i);
+        baseAngle = atan(differentiate(fittedFun,y(i)/yFactor));    % the angle of the perpendicullar line at point y
+    else                % Horizontal solution
+        dx = 0.03*x(i);
+        baseAngle = pi/2;  % the angle of the perpendicullar line at point y
+    end
+    dxx = dx/xFactor;
+    r = (0.5+rand())*sqrt(dyy^2+dxx^2);
+else  
+    r = 0.05*y(i)/yFactor;
+end
+
+end
+
+
